@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoAsYouLikeTrip AI - City Trip Planner & Concierge</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Leaflet Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Styling -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar: Search & Parameters -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <div class="logo-icon">🧭</div>
+                <div>
+                    <h1>GoAsYouLikeTrip AI</h1>
+                    <p class="subtitle">Concierge Travel Agent</p>
+                </div>
+            </div>
+
+            <div class="mode-badge free" id="modeBadge">
+                <span class="dot"></span>
+                <span class="text">Local Free Mode (Ollama)</span>
+            </div>
+
+            <form id="planForm" class="plan-form">
+                <div class="form-group">
+                    <label for="cityInput">Where are you going?</label>
+                    <input type="text" id="cityInput" placeholder="e.g., Paris, Tokyo, New York" required value="Paris">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label for="daysInput">Days</label>
+                        <select id="daysInput">
+                            <option value="1">1 Day</option>
+                            <option value="2">2 Days</option>
+                            <option value="3" selected>3 Days</option>
+                            <option value="4">4 Days</option>
+                            <option value="5">5 Days</option>
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label for="budgetInput">Budget (USD)</label>
+                        <input type="number" id="budgetInput" value="300" min="50" max="10000" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Preferred Activities</label>
+                    <div class="interest-tags">
+                        <span class="tag active" data-value="museums">🏛️ Museums</span>
+                        <span class="tag active" data-value="historical">🏰 History</span>
+                        <span class="tag active" data-value="parks">🌳 Nature/Parks</span>
+                        <span class="tag active" data-value="dining">🍴 Dining</span>
+                        <span class="tag" data-value="shopping">🛍️ Shopping</span>
+                        <span class="tag" data-value="landmarks">📸 Landmarks</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Transport Mode</label>
+                    <div class="transport-options">
+                        <label class="transport-opt">
+                            <input type="radio" name="transport" value="walking" checked>
+                            <div class="opt-card">
+                                <span class="icon">🚶</span>
+                                <span>Walk</span>
+                            </div>
+                        </label>
+                        <label class="transport-opt">
+                            <input type="radio" name="transport" value="transit">
+                            <div class="opt-card">
+                                <span class="icon">🚇</span>
+                                <span>Transit</span>
+                            </div>
+                        </label>
+                        <label class="transport-opt">
+                            <input type="radio" name="transport" value="driving">
+                            <div class="opt-card">
+                                <span class="icon">🚕</span>
+                                <span>Cab/Car</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    <span>Generate AI Itinerary</span>
+                    <span class="arrow">→</span>
+                </button>
+            </form>
+
+            <div class="sidebar-footer">
+                <button class="btn-settings" id="openSettingsBtn">⚙️ Credentials & API Keys</button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Loading Overlay -->
+            <div class="loading-overlay hidden" id="loadingOverlay">
+                <div class="loader-box">
+                    <div class="compass-loader">🧭</div>
+                    <h3 id="loaderTitle">Consulting GoAsYouLikeTrip AI...</h3>
+                    <ul class="loader-steps">
+                        <li class="step active" id="stepGeocode">📍 Geocoding target destination</li>
+                        <li class="step" id="stepPOIs">🔍 Extracting Points of Interest (OpenStreetMap)</li>
+                        <li class="step" id="stepPlan">🤖 Agent clustering and day allocation</li>
+                        <li class="step" id="stepRoutes">🛣️ Compiling routes and transport timings</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Welcome Screen (Initial State) -->
+            <div class="welcome-screen" id="welcomeScreen">
+                <div class="welcome-card">
+                    <span class="welcome-icon">✈️</span>
+                    <h2>Plan Your Next Adventure Instantly</h2>
+                    <p>Enter your destination, budget, and trip duration. GoAsYouLikeTrip AI will cluster places, structure opening times, optimize your budget, and map routes automatically.</p>
+                    <div class="features-list">
+                        <div class="feat"><span class="emoji">🗺️</span> <strong>Smart Clustering:</strong> Places grouped by proximity to reduce travel time.</div>
+                        <div class="feat"><span class="emoji">💰</span> <strong>Budget-Aware:</strong> Auto-swaps expensive entry fees with scenic/free options if budget is tight.</div>
+                        <div class="feat"><span class="emoji">🤖</span> <strong>Dual-Engine AI:</strong> Powered locally by Ollama Gemma 3 or Google Gemini Cloud.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard (Result State) -->
+            <div class="dashboard hidden" id="dashboard">
+                <!-- Result Left: Itinerary & Budget Details -->
+                <section class="details-panel">
+                    <div class="panel-header">
+                        <h2 id="destinationTitle">Paris Trip Itinerary</h2>
+                        <div class="tab-container" id="dayTabs">
+                            <!-- Tabs dynamically populated -->
+                        </div>
+                    </div>
+
+                    <div class="itinerary-scroll" id="itineraryContent">
+                        <!-- Places dynamically populated -->
+                    </div>
+
+                    <!-- Budget breakdown card -->
+                    <div class="budget-panel">
+                        <h3>📊 Agent Budget Allocation</h3>
+                        <div class="budget-content">
+                            <div class="chart-container">
+                                <canvas id="budgetChart"></canvas>
+                            </div>
+                            <div class="budget-legend" id="budgetLegend">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                        <div class="opt-notes" id="optimizationNotes">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Result Right: Interactive Map -->
+                <section class="map-panel">
+                    <div id="map"></div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Credentials Modal -->
+    <div class="modal-overlay hidden" id="settingsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>API Credentials & Settings</h2>
+                <button class="modal-close" id="closeSettingsBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">Configure keys to unlock premium features. By default, the application runs locally with <strong>Ollama (gemma3:latest)</strong> and free geocoding/routing tools.</p>
+                
+                <div class="form-group">
+                    <label for="geminiKeyInput">Google Gemini API Key</label>
+                    <input type="password" id="geminiKeyInput" placeholder="AIzaSy...">
+                    <p class="help-text">Unlocks Gemini 2.5 Flash for high-quality itinerary planning.</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="googleMapsKeyInput">Google Maps API Key</label>
+                    <input type="password" id="googleMapsKeyInput" placeholder="AIzaSy...">
+                    <p class="help-text">Unlocks official Google Places POIs and Google Map geocoding.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" id="clearKeysBtn">Clear Saved Keys</button>
+                <button class="btn-save" id="saveKeysBtn">Save Configuration</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Frontend Logic -->
+    <script src="app.js"></script>
+</body>
+</html>
