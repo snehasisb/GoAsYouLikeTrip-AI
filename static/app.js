@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
     updateModeBadge();
     loadSavedCredentialsInputs();
+    initGoogleAutocomplete(); // Try loading autocomplete on startup
 });
 
 // Initialize Leaflet Map
@@ -42,6 +43,45 @@ function initMap() {
         position: 'bottomright'
     }).addTo(map);
 }
+
+// Initialize Google Places Autocomplete dynamically
+function initGoogleAutocomplete() {
+    const apiKey = credentials.googleMapsApiKey;
+    if (!apiKey) return;
+    
+    // Check if script is already loaded
+    if (window.google && window.google.maps && window.google.maps.places) {
+        setupAutocomplete();
+        return;
+    }
+    
+    // Load script dynamically
+    const scriptId = 'google-maps-autocomplete-script';
+    if (document.getElementById(scriptId)) return;
+    
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=setupAutocomplete`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+}
+
+window.setupAutocomplete = function() {
+    const cityInput = document.getElementById('cityInput');
+    if (!cityInput) return;
+    
+    const autocomplete = new google.maps.places.Autocomplete(cityInput, {
+        types: ['(cities)']
+    });
+    
+    autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place.formatted_address) {
+            cityInput.value = place.formatted_address;
+        }
+    });
+};
 
 // Set up UI Event Listeners
 function initEventListeners() {
@@ -91,6 +131,7 @@ function initEventListeners() {
         localStorage.setItem('googleMapsApiKey', googleMapsInput);
         
         updateModeBadge();
+        initGoogleAutocomplete(); // Load/refresh autocomplete
         settingsModal.classList.add('hidden');
     });
 
@@ -155,6 +196,16 @@ async function handleFormSubmit(e) {
     // Get transport mode
     const transport = document.querySelector('input[name="transport"]:checked').value;
     
+    // Get pace & timing
+    const pace = document.getElementById('paceInput').value;
+    const startHour = parseInt(document.getElementById('startHourInput').value) || 9;
+    const endHour = parseInt(document.getElementById('endHourInput').value) || 18;
+    
+    // Get advanced preferences
+    const hotel = document.getElementById('hotelInput').value.trim();
+    const ages = document.getElementById('agesInput').value.trim();
+    const includeMeals = document.getElementById('includeMealsInput').checked;
+    
     // Show Loading
     const loadingOverlay = document.getElementById('loadingOverlay');
     loadingOverlay.classList.remove('hidden');
@@ -182,6 +233,12 @@ async function handleFormSubmit(e) {
             budget: budget,
             interests: activeTags,
             transport: transport,
+            pace: pace,
+            start_hour: startHour,
+            end_hour: endHour,
+            hotel: hotel || null,
+            ages: ages || "25",
+            include_meals: includeMeals,
             googleMapsApiKey: credentials.googleMapsApiKey || null,
             geminiApiKey: credentials.geminiApiKey || null
         };
@@ -296,8 +353,29 @@ function renderItineraryForDay(dayIndex) {
     // Day Color Code
     const color = DAY_COLORS[dayIndex % DAY_COLORS.length];
     
+    const seenCoords = [];
     places.forEach((place, idx) => {
-        waypoints.push([place.lat, place.lon]);
+        let lat = place.lat;
+        let lon = place.lon;
+        
+        // Prevent perfect overlapping by applying a spiral jitter pattern
+        let coordKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+        let offsetStep = 0.00015; // ~15 meters offset
+        let attempts = 0;
+        while (seenCoords.includes(coordKey) && attempts < 8) {
+            const angle = (attempts * Math.PI) / 4;
+            lat += Math.sin(angle) * offsetStep;
+            lon += Math.cos(angle) * offsetStep;
+            coordKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+            attempts++;
+        }
+        seenCoords.push(coordKey);
+        
+        // Store jittered coords for map actions
+        place.jitteredLat = lat;
+        place.jitteredLon = lon;
+        
+        waypoints.push([lat, lon]);
         
         // Add Marker to Map
         const markerIcon = L.divIcon({
@@ -307,7 +385,7 @@ function renderItineraryForDay(dayIndex) {
             iconAnchor: [14, 14]
         });
         
-        const mapMarker = L.marker([place.lat, place.lon], { icon: markerIcon }).addTo(map);
+        const mapMarker = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
         
         // Bind Popup
         mapMarker.bindPopup(`
@@ -353,8 +431,8 @@ function renderItineraryForDay(dayIndex) {
             const markerDiv = selectedMarker.getElement()?.querySelector('.custom-map-marker');
             if (markerDiv) markerDiv.classList.add('selected');
             
-            // Zoom map to coordinates
-            map.setView([place.lat, place.lon], 15, { animate: true });
+            // Zoom map to jittered coordinates
+            map.setView([place.jitteredLat, place.jitteredLon], 15, { animate: true });
             selectedMarker.openPopup();
         });
         
@@ -437,7 +515,13 @@ function renderBudgetAllocation(summary, totalBudget) {
     // Optimization Notes
     const notesEl = document.getElementById('optimizationNotes');
     if (summary.optimization_notes) {
-        notesEl.textContent = `💡 AI Agent Insights: ${summary.optimization_notes}`;
+        let notesText = summary.optimization_notes;
+        // Convert markdown links: [Text](URL)
+        notesText = notesText.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, '<a href="$2" target="_blank" style="color: #a5b4fc; text-decoration: underline; font-weight: 500;">$1</a>');
+        // Convert plain HTTP/S URLs that aren't already part of a link
+        notesText = notesText.replace(/(?<!href=")(https?:\/\/[^\s\)]+(?<!\)))/g, '<a href="$1" target="_blank" style="color: #a5b4fc; text-decoration: underline; font-weight: 500;">$1</a>');
+        
+        notesEl.innerHTML = `💡 AI Agent Insights: ${notesText}`;
         notesEl.classList.remove('hidden');
     } else {
         notesEl.classList.add('hidden');

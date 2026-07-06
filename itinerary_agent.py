@@ -216,8 +216,38 @@ def fetch_pois(city_name: str, lat: float, lon: float, google_key: Optional[str]
     except Exception as e:
         print(f"Overpass POI search failed: {e}")
         
-    # If all fails, use Paris as dummy default
-    return CURATED_CITIES["paris"]["places"]
+    # If all fails or returned places is empty, generate generic attractions custom to the requested city
+    print(f"Generating fallback generic attractions for {city_name}...")
+    
+    # Generic names tailored to requested city
+    attractions = [
+        {"suffix": "Central Park & Gardens", "category": "park", "cost": 0.0, "duration": 120, "desc": "A beautiful public green space with walking trails, fountains, and relaxing spots."},
+        {"suffix": "National Museum of Art", "category": "museum", "cost": 15.0, "duration": 150, "desc": "Housing a magnificent collection of historic artifacts, sculptures, and galleries."},
+        {"suffix": "Historic Landmark Tower", "category": "landmark", "cost": 10.0, "duration": 90, "desc": "A famous architectural marvel offering panoramic views of the city skyline."},
+        {"suffix": "Old Town Square", "category": "historical", "cost": 0.0, "duration": 90, "desc": "Steeped in local history, featuring old buildings, street performers, and cafes."},
+        {"suffix": "Scenic Riverwalk Promenade", "category": "landmark", "cost": 0.0, "duration": 60, "desc": "A scenic path along the water, perfect for photography and relaxing strolls."},
+        {"suffix": "Science & Tech Center", "category": "museum", "cost": 18.0, "duration": 120, "desc": "Interactive exhibits, science shows, and fun learning activities for everyone."},
+        {"suffix": "Traditional Food Market", "category": "dining", "cost": 0.0, "duration": 90, "desc": "A bustling local market with stalls selling traditional snacks, fruits, and food."},
+        {"suffix": "City Center Botanical Garden", "category": "park", "cost": 5.0, "duration": 100, "desc": "Stunning greenhouses, exotic plants, and peaceful walking pathways."}
+    ]
+    
+    fallback_places = []
+    for i, attr in enumerate(attractions):
+        # Distribute points within a ~3km radius
+        offset_lat = 0.015 * math.sin(i * 2 * math.pi / len(attractions))
+        offset_lon = 0.015 * math.cos(i * 2 * math.pi / len(attractions))
+        
+        fallback_places.append({
+            "name": f"{city_name.title()} {attr['suffix']}",
+            "lat": lat + offset_lat,
+            "lon": lon + offset_lon,
+            "cost": attr["cost"],
+            "duration_minutes": attr["duration"],
+            "open_hours": "09:00 - 18:00" if attr["category"] in ["museum", "historical"] else "24/7",
+            "category": attr["category"],
+            "description": f"{attr['desc']} Located in the heart of {city_name}."
+        })
+    return fallback_places
 
 # Get exact routing via OSRM
 def fetch_route_geometry(waypoints: List[Dict[str, float]], mode: str = "foot") -> List[List[float]]:
@@ -246,6 +276,165 @@ def fetch_route_geometry(waypoints: List[Dict[str, float]], mode: str = "foot") 
         line_coords.append([waypoints[i+1]["lat"], waypoints[i+1]["lon"]])
     return line_coords
 
+# Itinerary Guardrail and Sequence Formatting
+def guardrail_and_format_itinerary(
+    plan_data: Dict[str, Any],
+    hotel_data: Optional[Dict[str, Any]],
+    ages: List[int],
+    include_meals: bool,
+    start_hour: int,
+    end_hour: int,
+    pace: str,
+    transport: str,
+    budget: float,
+    days: int,
+    city_pass: str
+):
+    # Calculate group multiplier
+    multiplier_sum = 0.0
+    for age in ages:
+        if age < 12: multiplier_sum += 0.5
+        elif age <= 25: multiplier_sum += 0.7
+        elif age >= 65: multiplier_sum += 0.6
+        else: multiplier_sum += 1.0
+
+    for day in plan_data.get("days", []):
+        places = day.get("places", [])
+        
+        # Filter existing places (discard any old Start/End markers)
+        filtered_places = []
+        for p in places:
+            if p.get("category") == "hotel" and (p["name"].startswith("Start:") or p["name"].startswith("End:")):
+                continue
+            # Remove any trailing / Hotel / Restaurant from names if we want clean formatting
+            filtered_places.append(p)
+            
+        # Check if breakfast, lunch, dinner are already present
+        has_breakfast = any("breakfast" in p["name"].lower() or p.get("category") == "restaurant" and "breakfast" in p["description"].lower() for p in filtered_places)
+        has_lunch = any("lunch" in p["name"].lower() or p.get("category") == "restaurant" and "lunch" in p["description"].lower() for p in filtered_places)
+        has_dinner = any("dinner" in p["name"].lower() or p.get("category") == "restaurant" and "dinner" in p["description"].lower() for p in filtered_places)
+        
+        if include_meals:
+            # Inject breakfast
+            if not has_breakfast:
+                filtered_places.insert(0, {
+                    "name": "Breakfast Break",
+                    "lat": hotel_data["lat"] if hotel_data else (filtered_places[0]["lat"] if filtered_places else 0),
+                    "lon": hotel_data["lon"] if hotel_data else (filtered_places[0]["lon"] if filtered_places else 0),
+                    "cost": 8.0 * len(ages),
+                    "duration_minutes": 45,
+                    "open_hours": "24/7",
+                    "category": "restaurant",
+                    "description": "Enjoy breakfast at a local cafe to start the day."
+                })
+            # Inject lunch
+            if not has_lunch:
+                mid_index = len(filtered_places) // 2 if filtered_places else 0
+                filtered_places.insert(mid_index, {
+                    "name": "Lunch en route",
+                    "lat": filtered_places[mid_index-1]["lat"] if mid_index > 0 else (hotel_data["lat"] if hotel_data else 0),
+                    "lon": filtered_places[mid_index-1]["lon"] if mid_index > 0 else (hotel_data["lon"] if hotel_data else 0),
+                    "cost": 12.0 * len(ages),
+                    "duration_minutes": 60,
+                    "open_hours": "24/7",
+                    "category": "restaurant",
+                    "description": "Take a rest and enjoy local specialties for lunch."
+                })
+            # Inject dinner
+            if not has_dinner:
+                filtered_places.append({
+                    "name": "Dinner Break",
+                    "lat": hotel_data["lat"] if hotel_data else (filtered_places[-1]["lat"] if filtered_places else 0),
+                    "lon": hotel_data["lon"] if hotel_data else (filtered_places[-1]["lon"] if filtered_places else 0),
+                    "cost": 20.0 * len(ages),
+                    "duration_minutes": 90,
+                    "open_hours": "24/7",
+                    "category": "restaurant",
+                    "description": "Unwind with dinner at a traditional local restaurant."
+                })
+
+        # Insert hotel start/end markers
+        if hotel_data:
+            filtered_places.insert(0, {
+                "name": f"Start: {hotel_data['name']}",
+                "lat": hotel_data["lat"],
+                "lon": hotel_data["lon"],
+                "cost": 0.0,
+                "duration_minutes": 0,
+                "open_hours": "24/7",
+                "category": "hotel",
+                "description": "Depart from hotel to start the day's adventure."
+            })
+            filtered_places.append({
+                "name": f"End: {hotel_data['name']}",
+                "lat": hotel_data["lat"],
+                "lon": hotel_data["lon"],
+                "cost": 0.0,
+                "duration_minutes": 0,
+                "open_hours": "24/7",
+                "category": "hotel",
+                "description": "Return to hotel for a restful night."
+            })
+            
+        # Re-schedule times sequentially starting at start_hour
+        current_hour = start_hour
+        current_minute = 0
+        
+        for p in filtered_places:
+            duration = p.get("duration_minutes", 60)
+            if p.get("category") == "hotel":
+                duration = 0
+                
+            start_str = f"{current_hour:02d}:{current_minute:02d}"
+            
+            current_minute += duration
+            current_hour += current_minute // 60
+            current_minute = current_minute % 60
+            
+            if p.get("category") == "hotel":
+                p["recommended_time_slot"] = f"{start_str} - {start_str}"
+            else:
+                end_str = f"{current_hour:02d}:{current_minute:02d}"
+                p["recommended_time_slot"] = f"{start_str} - {end_str}"
+                
+                # Gap after activity (except for restaurant/hotel)
+                if p.get("category") not in ["hotel", "restaurant"]:
+                    current_minute += 30
+                    current_hour += current_minute // 60
+                    current_minute = current_minute % 60
+                    
+        day["places"] = filtered_places
+
+    # Recalculate budget summary
+    total_attraction = 0.0
+    total_food = 0.0
+    for day in plan_data.get("days", []):
+        for p in day.get("places", []):
+            if p.get("category") == "restaurant":
+                total_food += p.get("cost", 0.0)
+            elif p.get("category") not in ["hotel"]:
+                total_attraction += p.get("cost", 0.0)
+                
+    estimated_transport = days * (2.0 if transport == "walking" else 8.0 if transport == "transit" else 20.0) * len(ages)
+    total_spent = total_attraction + total_food + estimated_transport
+    
+    if "budget_summary" not in plan_data:
+        plan_data["budget_summary"] = {}
+        
+    plan_data["budget_summary"]["total_attraction_cost"] = total_attraction
+    plan_data["budget_summary"]["estimated_transport_cost"] = estimated_transport
+    plan_data["budget_summary"]["estimated_food_cost"] = total_food
+    plan_data["budget_summary"]["total_spent"] = total_spent
+    plan_data["budget_summary"]["remaining_budget"] = budget - total_spent
+    
+    # Prepend age discount info to optimization notes
+    orig_notes = plan_data["budget_summary"].get("optimization_notes", "")
+    plan_data["budget_summary"]["optimization_notes"] = (
+        f"Group Profile: {len(ages)} traveler(s) with ages {ages} (Multiplier: {multiplier_sum:.2f}x). "
+        f"Pass Rec: {city_pass}. "
+        f"{orig_notes}"
+    )
+
 # AI Agent loop: plans and optimizes the itinerary
 def plan_itinerary_agent(
     city_name: str, 
@@ -255,11 +444,48 @@ def plan_itinerary_agent(
     budget: float, 
     interests: List[str], 
     transport: str,
-    gemini_key: Optional[str] = None
+    pace: str = "moderate",
+    start_hour: int = 9,
+    end_hour: int = 18,
+    hotel_data: Optional[Dict[str, Any]] = None,
+    ages: List[int] = [25],
+    include_meals: bool = True,
+    gemini_key: Optional[str] = None,
+    google_key: Optional[str] = None
 ) -> Dict[str, Any]:
     
     # 1. Fetch available POIs
-    pois = fetch_pois(city_name, lat, lon)
+    pois = fetch_pois(city_name, lat, lon, google_key)
+    
+    # Calculate traveler multiplier
+    multiplier_sum = 0.0
+    traveler_types = []
+    for age in ages:
+        if age < 12:
+            multiplier_sum += 0.5
+            traveler_types.append(f"Child (age {age}, 50% discount)")
+        elif age <= 25:
+            multiplier_sum += 0.7
+            traveler_types.append(f"Student/Youth (age {age}, 30% discount)")
+        elif age >= 65:
+            multiplier_sum += 0.6
+            traveler_types.append(f"Senior (age {age}, 40% discount)")
+        else:
+            multiplier_sum += 1.0
+            traveler_types.append(f"Adult (age {age})")
+            
+    # Recommendations for transit / passes
+    pass_recommendations = {
+        "paris": "Paris Visite Pass (Unlimited transit in zones 1-3 from €13.90/day. Details: https://www.ratp.fr/en/titres-et-tarifs/paris-visite-pass)",
+        "london": "Visitor Oyster Card (Daily caps apply. Details: https://tfl.gov.uk/travel-information/visiting-london)",
+        "tokyo": "Tokyo Subway 24/48/72-Hour Ticket (Unlimited subway from ¥800. Details: https://www.tokyometro.jp/en/ticket/travel/)",
+        "new york": "MTA MetroCard / OMNY (Pay-per-ride or 7-Day Unlimited for $34. Details: https://new.mta.info/fares)",
+        "kolkata": "Kolkata Metro Smart Card (Offers 10% discount on standard fares. Details: https://mtp.indianrailways.gov.in/)"
+    }
+    city_pass = pass_recommendations.get(
+        city_name.lower(), 
+        f"{city_name.title()} Public Transit Pass (Buy a local tourist day pass for discounted transit. Search details on Google.)"
+    )
     
     # 2. Formulate prompt for LLM
     poi_list_str = "\n".join([
@@ -267,40 +493,57 @@ def plan_itinerary_agent(
         for p in pois
     ])
     
-    prompt = f"""You are an expert AI Travel Agent. Your task is to plan a structured, optimal, day-by-day travel itinerary for a city trip.
+    prompt = f"""You are an expert AI Travel Agent. Your task is to plan a structured, day-by-day travel itinerary for a city trip.
 City: {city_name}
 Duration: {days} days
 Total Budget: ${budget} USD
 Preferences/Interests: {", ".join(interests)}
-Transport Mode: {transport} (walking, driving, transit)
+Transport Mode: {transport}
+
+Traveler Profile:
+- Number of travelers: {len(ages)}
+- Ages: {", ".join(map(str, ages))}
+- Traveler Breakdown: {", ".join(traveler_types)}
+- Total Group Discount Factor: {multiplier_sum:.2f}x (Note: child < 12 is 50% cost, student 12-25 is 70% cost, senior 65+ is 60% cost). Make sure to sum up attraction admission costs across ALL travelers using their ages and apply these discounts!
+
+Starting/Ending Hotel Location:
+{f'- Name: {hotel_data["name"]}, Latitude: {hotel_data["lat"]}, Longitude: {hotel_data["lon"]}' if hotel_data else '- No hotel location specified. Start directly at attractions.'}
+
+Meal Suggestions:
+{'- Include breakfast, lunch, and dinner recommendations in the itinerary timeline (at appropriate hours: e.g. ~08:30, ~13:00, ~19:30).' if include_meals else '- Do not schedule detailed meal slots.'}
+
+Transit Pass & Discounts Recommendation:
+{city_pass}
 
 Here is a list of available Attractions/Points of Interest (POIs):
 {poi_list_str}
 
 Please plan the itinerary following these strict rules:
-1. Divide the attractions into {days} separate days. Group nearby places on the same day (minimize travel distances).
-2. Schedule a maximum of 3-4 places per day (morning, afternoon, evening). Ensure they fit within their open hours.
-3. Keep track of costs. Estimate:
-   - Attraction Costs (use the provided costs, or adjust if they are too high)
-   - Transport Cost: Estimate ${2 if transport == "walking" else 8 if transport == "transit" else 20} per day for transport.
-   - Food Cost: Estimate $30 per day for food.
-4. Budget Constraint: The sum of Attraction Costs + Transport Costs + Food Costs MUST NOT exceed the total budget of ${budget} USD.
-   If the total cost exceeds the budget, YOU MUST OPTIMIZE: Swap expensive attractions with free attractions (e.g. parks, scenic walks, free landmarks) and document this in the 'optimization_notes'.
-5. Return ONLY a valid JSON object matching the following structure. Do not include markdown code block syntax (like ```json) in your raw response, just output the JSON itself:
+1. Hotel Integration: If a hotel is specified, start each day at the hotel, visit attractions, and end each day back at the hotel.
+2. Schedule places based on the preferred pace:
+   - relaxed (1-2 attractions/day)
+   - moderate (3 attractions/day)
+   - hasty (4-5 attractions/day)
+3. Timing Constraint: Start activities at {start_hour}:00, and end no later than {end_hour}:00.
+4. Intersperse meals (breakfast, lunch, dinner) at suitable times if meals are requested.
+5. Budget Constraint: The sum of Group Attraction Costs + Group Transport Costs + Group Food Costs MUST NOT exceed the total budget of ${budget} USD.
+   If the total cost exceeds the budget, YOU MUST OPTIMIZE: Swap expensive attractions with free attractions or recommend cheaper dining and document this in the 'optimization_notes'.
+6. Include the suggested transit pass name and link in the 'optimization_notes'.
+7. Return ONLY a valid JSON object matching the following structure. Do not include markdown code block syntax (like ```json) in your raw response, just output the JSON itself:
 {{
   "days": [
     {{
       "day_number": 1,
       "places": [
         {{
-          "name": "Attraction Name",
+          "name": "Attraction Name / Hotel / Restaurant",
           "lat": 48.8584,
           "lon": 2.2945,
-          "cost": 15.0,
+          "cost": 15.0, // calculated group cost (multiplied by group factor)
           "duration_minutes": 120,
           "open_hours": "09:00 - 18:00",
           "recommended_time_slot": "09:00 - 11:00",
-          "category": "landmark",
+          "category": "landmark", // "hotel", "restaurant", or "landmark"/"museum"/etc.
           "description": "Short description of what the user does there."
         }}
       ]
@@ -312,7 +555,7 @@ Please plan the itinerary following these strict rules:
     "estimated_food_cost": 90.0,
     "total_spent": 159.0,
     "remaining_budget": 341.0,
-    "optimization_notes": "Explanation of budget choices, changes made, and travel recommendations."
+    "optimization_notes": "Explanation of budget choices, discounts applied, and links for recommended passes."
   }}
 }}"""
 
@@ -376,30 +619,77 @@ Please plan the itinerary following these strict rules:
         # Sort POIs by distance from center
         sorted_pois = sorted(pois, key=lambda x: haversine_distance(lat, lon, x["lat"], x["lon"]))
         
-        # Simple clustering: split sorted list into groups of days
-        places_per_day = math.ceil(len(sorted_pois) / days)
-        if places_per_day < 2:
+        # Determine places per day based on pace
+        if pace == "relaxed":
             places_per_day = 2
+        elif pace == "hasty":
+            places_per_day = 4
+        else:
+            places_per_day = 3
             
         days_list = []
         total_attraction_cost = 0.0
         
         for d in range(days):
             day_places = []
+            
+            # Start at Hotel
+            if hotel_data:
+                day_places.append({
+                    "name": f"Start: {hotel_data['name']}",
+                    "lat": hotel_data["lat"],
+                    "lon": hotel_data["lon"],
+                    "cost": 0.0,
+                    "duration_minutes": 0,
+                    "open_hours": "24/7",
+                    "recommended_time_slot": f"{start_hour:02d}:00 - {start_hour:02d}:00",
+                    "category": "hotel",
+                    "description": "Depart from hotel to start the day's adventure."
+                })
+            
+            current_hour = start_hour
+            
+            # Optional Breakfast
+            if include_meals:
+                day_places.append({
+                    "name": "Breakfast Break",
+                    "lat": hotel_data["lat"] if hotel_data else lat,
+                    "lon": hotel_data["lon"] if hotel_data else lon,
+                    "cost": 8.0 * len(ages),
+                    "duration_minutes": 45,
+                    "open_hours": "24/7",
+                    "recommended_time_slot": f"{current_hour:02d}:00 - {current_hour:02d}:45",
+                    "category": "restaurant",
+                    "description": "Enjoy a local breakfast to fuel up for the day."
+                })
+                current_hour += 1
+            
             start_idx = d * places_per_day
             end_idx = min(start_idx + places_per_day, len(sorted_pois))
-            
-            # Select places for this day
             candidate_places = sorted_pois[start_idx:end_idx]
             
-            # Time scheduler
-            current_hour = 9
             for i, p in enumerate(candidate_places):
-                cost = p["cost"]
+                # Apply traveler age discounts
+                cost = p["cost"] * multiplier_sum
                 
-                # Dynamic Budget Optimization: If we are low on budget, swap high-cost items
-                if total_attraction_cost + cost + (days * 30.0) + (days * 8.0) > budget:
-                    # Swap with free item/skip cost
+                # Check lunch insertion
+                if include_meals and current_hour >= 13 and not any(dp["category"] == "restaurant" and "Lunch" in dp["name"] for dp in day_places):
+                    day_places.append({
+                        "name": "Lunch en route",
+                        "lat": p["lat"],
+                        "lon": p["lon"],
+                        "cost": 12.0 * len(ages),
+                        "duration_minutes": 60,
+                        "open_hours": "24/7",
+                        "recommended_time_slot": "13:00 - 14:00",
+                        "category": "restaurant",
+                        "description": "Enjoy lunch near attractions."
+                    })
+                    current_hour = max(current_hour, 14)
+                
+                # Dynamic Budget Optimization
+                total_est_so_far = total_attraction_cost + cost + (days * 30.0 * len(ages)) + (days * (2.0 if transport == "walking" else 8.0 if transport == "transit" else 20.0))
+                if total_est_so_far > budget:
                     cost = 0.0
                     p["name"] = f"{p['name']} (Free Walk outside / Photo Stop)"
                     p["description"] = f"Viewed from outside to fit within budget constraint. {p['description']}"
@@ -407,8 +697,10 @@ Please plan the itinerary following these strict rules:
                 total_attraction_cost += cost
                 duration = p["duration_minutes"]
                 start_str = f"{current_hour:02d}:00"
-                end_hour = current_hour + math.ceil(duration / 60)
-                end_str = f"{end_hour:02d}:00"
+                e_hour = current_hour + math.ceil(duration / 60)
+                if e_hour > end_hour:
+                    e_hour = end_hour
+                end_str = f"{e_hour:02d}:00"
                 
                 day_places.append({
                     "name": p["name"],
@@ -421,15 +713,46 @@ Please plan the itinerary following these strict rules:
                     "category": p["category"],
                     "description": p["description"]
                 })
-                current_hour = end_hour + 1 # 1 hour gap/transit
+                current_hour = e_hour + 1 # transit gap
+                if current_hour >= end_hour:
+                    break
+            
+            # Optional Dinner
+            if include_meals and current_hour < end_hour:
+                day_places.append({
+                    "name": "Dinner Break",
+                    "lat": hotel_data["lat"] if hotel_data else lat,
+                    "lon": hotel_data["lon"] if hotel_data else lon,
+                    "cost": 20.0 * len(ages),
+                    "duration_minutes": 90,
+                    "open_hours": "24/7",
+                    "recommended_time_slot": f"{current_hour:02d}:00 - {min(current_hour+2, end_hour):02d}:00",
+                    "category": "restaurant",
+                    "description": "Relax with dinner at a traditional local restaurant."
+                })
+                current_hour = min(current_hour + 2, end_hour)
+            
+            # End at Hotel
+            if hotel_data:
+                day_places.append({
+                    "name": f"End: {hotel_data['name']}",
+                    "lat": hotel_data["lat"],
+                    "lon": hotel_data["lon"],
+                    "cost": 0.0,
+                    "duration_minutes": 0,
+                    "open_hours": "24/7",
+                    "recommended_time_slot": f"{end_hour:02d}:00 - {end_hour:02d}:00",
+                    "category": "hotel",
+                    "description": "Return to hotel for a restful night."
+                })
                 
             days_list.append({
                 "day_number": d + 1,
                 "places": day_places
             })
             
-        estimated_transport_cost = days * (2.0 if transport == "walking" else 8.0 if transport == "transit" else 20.0)
-        estimated_food_cost = days * 30.0
+        estimated_transport_cost = days * (2.0 if transport == "walking" else 8.0 if transport == "transit" else 20.0) * len(ages)
+        estimated_food_cost = days * 30.0 * len(ages)
         total_spent = total_attraction_cost + estimated_transport_cost + estimated_food_cost
         
         plan_data = {
@@ -440,9 +763,24 @@ Please plan the itinerary following these strict rules:
                 "estimated_food_cost": estimated_food_cost,
                 "total_spent": total_spent,
                 "remaining_budget": budget - total_spent,
-                "optimization_notes": "Itinerary planned using spatial clustering. Swapped expensive entrances to outer views if budget bounds were exceeded."
+                "optimization_notes": f"Itinerary planned using spatial clustering. Group size: {len(ages)} traveler(s) with ages {ages}. {city_pass}"
             }
         }
+
+    # Apply post-processing guardrail to align hotel, meals, and times
+    guardrail_and_format_itinerary(
+        plan_data=plan_data,
+        hotel_data=hotel_data,
+        ages=ages,
+        include_meals=include_meals,
+        start_hour=start_hour,
+        end_hour=end_hour,
+        pace=pace,
+        transport=transport,
+        budget=budget,
+        days=days,
+        city_pass=city_pass
+    )
 
     # 5. Route calculation (add map geometries to each day)
     for day in plan_data["days"]:

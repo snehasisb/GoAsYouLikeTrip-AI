@@ -30,6 +30,12 @@ class PlanRequest(BaseModel):
     budget: float = Field(..., gt=0, example=500.0)
     interests: List[str] = Field(default=["museums", "historical", "parks", "dining"])
     transport: str = Field(default="transit", example="transit")
+    pace: str = Field(default="moderate", example="moderate")
+    start_hour: int = Field(default=9, example=9)
+    end_hour: int = Field(default=18, example=18)
+    hotel: Optional[str] = Field(default=None, example="Hotel Hilton Paris")
+    ages: str = Field(default="25", example="25, 70, 8")
+    include_meals: bool = Field(default=True)
     googleMapsApiKey: Optional[str] = None
     geminiApiKey: Optional[str] = None
 
@@ -51,6 +57,36 @@ def api_plan(req: PlanRequest):
         # 1. Geocode city first to get coordinates
         loc = geocode_city(req.city, req.googleMapsApiKey)
         
+        # 1b. Geocode hotel if specified
+        hotel_data = None
+        if req.hotel and req.hotel.strip():
+            try:
+                # Append city name to hotel to make geocoding precise
+                hotel_query = f"{req.hotel.strip()}, {req.city}"
+                h_loc = geocode_city(hotel_query, req.googleMapsApiKey)
+                hotel_data = {
+                    "name": req.hotel.strip(),
+                    "lat": h_loc["lat"],
+                    "lon": h_loc["lon"]
+                }
+            except Exception as he:
+                print(f"Failed to geocode hotel: {he}")
+                # Fallback: place hotel slightly offset from city center
+                hotel_data = {
+                    "name": req.hotel.strip(),
+                    "lat": loc["lat"] - 0.005,
+                    "lon": loc["lon"] - 0.005
+                }
+        
+        # Parse ages
+        age_list = []
+        try:
+            age_list = [int(a.strip()) for a in req.ages.split(",") if a.strip()]
+        except:
+            age_list = [25]
+        if not age_list:
+            age_list = [25]
+        
         # 2. Generate optimized itinerary via the agent
         itinerary = plan_itinerary_agent(
             city_name=req.city,
@@ -60,7 +96,14 @@ def api_plan(req: PlanRequest):
             budget=req.budget,
             interests=req.interests,
             transport=req.transport,
-            gemini_key=req.geminiApiKey
+            pace=req.pace,
+            start_hour=req.start_hour,
+            end_hour=req.end_hour,
+            hotel_data=hotel_data,
+            ages=age_list,
+            include_meals=req.include_meals,
+            gemini_key=req.geminiApiKey,
+            google_key=req.googleMapsApiKey
         )
         
         return {

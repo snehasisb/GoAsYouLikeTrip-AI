@@ -94,6 +94,43 @@
                     </div>
                 </div>
 
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label for="paceInput">Tour Pace</label>
+                        <select id="paceInput">
+                            <option value="relaxed">Relaxed</option>
+                            <option value="moderate" selected>Moderate</option>
+                            <option value="hasty">Hasty</option>
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label>Hours (Start - End)</label>
+                        <div class="form-row" style="gap: 8px;">
+                            <input type="number" id="startHourInput" value="9" min="5" max="12" style="text-align: center; padding: 12px 6px;" title="Start Hour (e.g. 9)">
+                            <input type="number" id="endHourInput" value="18" min="15" max="23" style="text-align: center; padding: 12px 6px;" title="End Hour (e.g. 18)">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="hotelInput">Hotel / Stay Location (Optional)</label>
+                    <input type="text" id="hotelInput" placeholder="e.g. Hotel Hilton Paris, or street name">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label for="agesInput">Traveler Ages</label>
+                        <input type="text" id="agesInput" value="25" placeholder="e.g., 25, 70, 8">
+                    </div>
+                    <div class="form-group half" style="justify-content: center;">
+                        <label style="margin-bottom: 8px;">Meal & Pass Recs</label>
+                        <label class="toggle-switch" style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #a5b4fc; font-size: 0.85rem;">
+                            <input type="checkbox" id="includeMealsInput" checked style="accent-color: #7c3aed; width: 18px; height: 18px;">
+                            Include Suggestions
+                        </label>
+                    </div>
+                </div>
+
                 <button type="submit" class="btn-submit" id="submitBtn">
                     <span>Generate AI Itinerary</span>
                     <span class="arrow">→</span>
