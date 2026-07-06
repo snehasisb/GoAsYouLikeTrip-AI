@@ -2,9 +2,7 @@
 
 **GoAsYouLikeTrip AI** is an advanced, end-to-end travel concierge application powered by AI agents. Designed as a submission for the *Kaggle 5-Day AI Agents Intensive Course*, the application helps travelers plan optimal, budget-conscious day-by-day travel itineraries. 
 
-By leveraging **local Ollama models (Gemma 3)** for offline utility and **Google Gemini 2.5 Flash** for premium cloud reasoning, the system clusters points of interest (POIs) spatially, tracks schedules, manages transport logistics, and optimizes overall expenses to guarantee compliance with budget bounds.
-
-![GoAsYouLikeTrip AI Dashboard](https://raw.githubusercontent.com/username/project/main/screenshot.png) *(Placeholder for your repository screenshot - you can use `loaded_itinerary_1783361351982.png` here!)*
+By leveraging **local Ollama models (Gemma 3)** for offline utility and **Google Gemini 2.5 Flash** / HIGHER for premium cloud reasoning, the system clusters points of interest (POIs) spatially, tracks schedules, manages transport logistics, and optimizes overall expenses to guarantee compliance with budget bounds.
 
 ---
 
@@ -82,10 +80,6 @@ python3 main.py
 
 ---
 
-## 📝 Kaggle Submission Writeup Draft
-
-Below is the finalized writeup for your submission:
-
 ```markdown
 # Capstone Submission: GoAsYouLikeTrip AI - Multi-Agent Concierge Travel Planner
 
@@ -94,51 +88,6 @@ Below is the finalized writeup for your submission:
 *   **🌐 Live Deployed Application**: https://goasyouliketrip-ai.onrender.com
 
 ---
-
-### 📷 Application Interface Preview
-Below is a screenshot of the live welcome dashboard ready to plan a new trip:
-
-![GoAsYouLikeTrip AI Welcome Screen](https://raw.githubusercontent.com/snehasisb/GoAsYouLikeTrip-AI/main/welcome_screenshot.png)
-
----
-
-### 1. Project Overview & Dynamic Agent Features
-**GoAsYouLikeTrip AI** is a highly premium, dark-themed travel planner that dynamically builds and schedules day-by-day itineraries tailored to traveler demographics, transport modes, timing constraints, and budget targets:
-*   **Stay Location (Hotel) Loop Routing**: Users can specify their hotel stay. The agent geocodes the hotel and wraps each day's route to start and end at the hotel (drawing closed loop routes on the map).
-*   **Multi-Traveler Age Discounts**: Parses traveler ages (e.g. `25, 71, 9`) and applies group discount factors (Child <12: 50% off; Youth 12-25: 30% off; Senior 65+: 40% off) to attraction entry fees.
-*   **En Route Meal Scheduling**: When active, the agent schedules Breakfast, Lunch, and Dinner breaks en route and updates the budget breakdown accordingly.
-*   **Official Transit Pass Recommendations**: Analyzes the destination and budget to recommend official transit cards (e.g. *Paris Visite Pass*, *Kolkata Metro Smart Card*) with clickable direct booking links.
-*   **Pacing Guardrail**: Limits the number of daily tourist spots (Relaxed = 2/day, Moderate = 3/day, Hasty = 4-5/day) to fit the user's preferred pace.
-
----
-
-### 2. System Architecture & Decision Loop
-The application uses a hybrid architecture combining LLM planning nodes with a deterministic Python verification and guardrail engine:
-
-```mermaid
-flowchart TD
-    subgraph Client [Web Interface - HTML5 / CSS3 / JS]
-        UI[User Inputs: Destination, Budget, Hotel, Ages, Pace, Meals] -->|HTTP POST Payload| API[FastAPI Backend - main.py]
-        R_Map[Leaflet Map Render] <---|JSON Response| API
-        R_Chart[Chart.js Budget Allocation] <---|JSON Response| API
-        R_Timeline[Timeline Schedule & Links] <---|JSON Response| API
-    end
-
-    subgraph Backend_Planning [FastAPI Agent Loop - itinerary_agent.py]
-        API --> Resolving[Nominatim/Google Geocoder]
-        Resolving --> POIs[OpenStreetMap Overpass / Geocoded Fallbacks]
-        POIs --> LLM_Node[LLM Planner Node: Gemini 2.5 Flash / Gemma 3]
-        
-        subgraph Guardrail_Engine [Python Rules & Optimization Guardrails]
-            LLM_Node --> G_Hotel[Hotel Round-Trip Wrapper]
-            G_Hotel --> G_Meals[Meal Breaks Injector]
-            G_Meals --> G_Time[Chronological Time Aligner]
-            G_Time --> G_Discount[Age-Based Discount Calculator]
-        end
-
-        Guardrail_Engine --> OSRM[OSRM Routing Server - Path Geometry]
-    end
-```
 
 #### Decision Cycle Details:
 1. **POI Querying (Tools)**: Resolves coordinates and queries OSM Overpass for local attractions. If the API limits out or returns empty results, the agent runs a custom geocoded grid fallback to distribute 8 valid local POIs around the target city.
